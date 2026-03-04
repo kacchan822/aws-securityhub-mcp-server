@@ -33,7 +33,7 @@ uv sync
 
 ```env
 AWS_PROFILE=your-profile
-AWS_REGION=ap-northeast-1
+AWS_DEFAULT_REGION=ap-northeast-1
 ```
 
 または、AWS CLIの設定ファイルを使用します。
@@ -67,34 +67,59 @@ uv run ruff check --fix src tests
 
 このサーバーで利用可能なツール：
 
-### `get_findings`
+### `get_security_hub_findings`
 
-AWS SecurityHubからファインディングを取得します。
-
-**パラメータ：**
-- `filter_criteria` (str): フィルター条件 (デフォルト: 'ACTIVE')
-- `max_results` (int): 返す結果の最大数 (デフォルト: 100)
-
-**戻り値：**
-- ファインディングのリストとメタデータ
-
-### `update_finding`
-
-SecurityHubのファインディングステータスを更新します。
+AWS SecurityHubからFindingを検索・取得します（V2 API使用）。
 
 **パラメータ：**
-- `finding_id` (str): 更新するファインディングのID
-- `status` (str): 新しいステータス ('RESOLVED', 'SUPPRESSED' など)
+- `aws_region` (str, optional): AWSリージョン。デフォルト: `ap-northeast-1`
+- `severities` (list[str], optional): 重要度フィルタ（Fatal, Critical, High, Medium, Low, Informational）
+- `aws_account_ids` (list[str], optional): AWSアカウントIDリスト（12桁）
+- `titles` (list[str], optional): Findingタイトル（前方一致）
+- `status_ids` (list[int], optional): ステータスID（0-6, 99）
+- `max_results` (int, optional): 返却件数（1-100、デフォルト: 20）
+- `next_token` (str, optional): ページネーション用トークン
 
 **戻り値：**
-- 更新されたファインディングの詳細
+- `findings`: Finding配列
+  - `metadata_uid`: メタデータUID（更新に必須）
+  - `cloud_account_uid`: アカウントUID
+  - `finding_info_uid`: Finding情報UID
+  - `metadata_product_uid`: プロダクトUID
+  - `title`: Finding名
+  - `description`: 説明
+  - `severity`: 重要度
+  - `status_id`: ステータスID
+  - `created_at`: 作成日時（ISO 8601）
+  - `updated_at`: 更新日時（ISO 8601）
+  - `resource_type`: リソースタイプ
+  - `resource_id`: リソースID
+- `next_token`: 次ページトークン（あれば）
+- `count`: 返却件数
 
-### `get_standards_compliance`
+### `update_finding_status`
 
-SecurityHubの標準適合情報を取得します。
+FindingのステータスをV2 APIで更新します。
+
+**パラメータ：**
+- `aws_region` (str, optional): AWSリージョン。デフォルト: `ap-northeast-1`
+- `metadata_uids` (list[str], optional): メタデータUIDリスト。`finding_identifiers`と排他。
+- `finding_identifiers` (list[dict], optional): 3点識別子リスト。以下を含む：
+  - `cloud_account_uid` (str): アカウントUID
+  - `finding_info_uid` (str): Finding情報UID
+  - `metadata_product_uid` (str): プロダクトUID
+  - `metadata_uids`と排他。
+- `status_id` (int, required): 更新先ステータスID（0-6, 99）
+- `comment` (str, optional): 変更理由
 
 **戻り値：**
-- 標準とコンプライアンスステータスの情報
+- `success` (bool): 全件成功時True
+- `processed_count` (int): 成功件数
+- `unprocessed_count` (int): 失敗件数
+- `unprocessed_findings` (list[dict], optional): 失敗詳細
+  - `finding_identifier`: 識別子
+  - `error_code`: エラーコード
+  - `error_message`: エラーメッセージ
 
 ## サーバーの実行
 
