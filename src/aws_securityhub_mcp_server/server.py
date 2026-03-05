@@ -331,7 +331,7 @@ def get_security_hub_findings(
         )
         
         # Prepare API parameters
-        params = {"MaxResults": input_data.max_results}
+        params: dict[str, Any] = {"MaxResults": input_data.max_results}
         if filters:
             params["Filters"] = filters
         if input_data.next_token:
@@ -428,12 +428,13 @@ def update_finding_status(
         client = get_securityhub_client(input_data.aws_region)
         
         # Prepare update parameters
-        update_params = {"StatusId": input_data.status_id}
+        update_params: dict[str, Any] = {"StatusId": input_data.status_id}
         
         if input_data.metadata_uids:
             update_params["MetadataUids"] = input_data.metadata_uids
             logger.info(f"Updating {len(input_data.metadata_uids)} findings by metadata_uids")
         else:
+            assert input_data.finding_identifiers is not None
             update_params["FindingIdentifiers"] = [
                 {
                     "CloudAccountUid": fi.cloud_account_uid,
@@ -454,7 +455,7 @@ def update_finding_status(
         unprocessed = response.get("UnprocessedFindings", [])
         unprocessed_count = len(unprocessed)
         
-        result = {
+        result: dict[str, Any] = {
             "success": unprocessed_count == 0,
             "processed_count": processed_count,
             "unprocessed_count": unprocessed_count
