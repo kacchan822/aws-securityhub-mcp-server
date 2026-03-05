@@ -13,6 +13,7 @@ from aws_securityhub_mcp_server.server import (
     clear_securityhub_client_cache,
     GetFindingsInput,
     UpdateFindingsV2Input,
+    FindingIdentifier,
     SeverityEnum,
 )
 
@@ -285,7 +286,7 @@ class TestFormatFindingForResponse:
         assert formatted["title"] == "Test"
         assert formatted["cloud_account_uid"] == "123456789012"
         assert formatted["finding_info_uid"] is None  # Not provided in minimal case
-        assert formatted["metadata_product_uid"] == ""  # Empty when product.uid not present
+        assert formatted["metadata_product_uid"] is None  # None when product.uid not present
         assert formatted["severity"] is None
 
     def test_format_finding_no_null_values_for_complete_data(self):
@@ -366,11 +367,11 @@ class TestFormatFindingForResponse:
 
         formatted = format_finding_for_response(raw_finding)
 
-        # All fields should be None or empty when nested objects are empty
+        # All fields should be None when nested objects are empty
         assert formatted["metadata_uid"] is None
         assert formatted["cloud_account_uid"] is None
         assert formatted["finding_info_uid"] is None
-        assert formatted["metadata_product_uid"] == ""
+        assert formatted["metadata_product_uid"] is None
         assert formatted["title"] is None
         assert formatted["description"] is None
         assert formatted["resource_type"] is None
@@ -612,6 +613,128 @@ class TestUpdateFindingStatus:
 
         assert result["success"] is False
         assert result["error"] == "ValidationError"
+
+    def test_finding_identifier_invalid_account_uid_format(self):
+        """Test FindingIdentifier validation rejects invalid AWS account ID format"""
+        # Account ID must be 12 digits
+        with pytest.raises(ValidationError) as exc_info:
+            FindingIdentifier(
+                cloud_account_uid="12345",  # Too short
+                finding_info_uid="finding-1",
+                metadata_product_uid="product-1"
+            )
+        assert "cloud_account_uid must be 12-digit" in str(exc_info.value)
+
+    def test_finding_identifier_account_uid_with_non_digits(self):
+        """Test FindingIdentifier validation rejects non-numeric account ID"""
+        with pytest.raises(ValidationError) as exc_info:
+            FindingIdentifier(
+                cloud_account_uid="1234567890ab",  # Non-numeric
+                finding_info_uid="finding-1",
+                metadata_product_uid="product-1"
+            )
+        assert "cloud_account_uid must be 12-digit" in str(exc_info.value)
+
+    def test_finding_identifier_empty_finding_info_uid(self):
+        """Test FindingIdentifier validation rejects empty finding_info_uid"""
+        with pytest.raises(ValidationError) as exc_info:
+            FindingIdentifier(
+                cloud_account_uid="123456789012",
+                finding_info_uid="",  # Empty
+                metadata_product_uid="product-1"
+            )
+        assert "at least 1 character" in str(exc_info.value).lower()
+
+    def test_finding_identifier_empty_product_uid_string(self):
+        """Test FindingIdentifier validation rejects empty string for metadata_product_uid"""
+        with pytest.raises(ValidationError) as exc_info:
+            FindingIdentifier(
+                cloud_account_uid="123456789012",
+                finding_info_uid="finding-1",
+                metadata_product_uid=""  # Empty string not allowed
+            )
+        assert "cannot be empty string" in str(exc_info.value)
+
+    def test_finding_identifier_with_none_product_uid(self):
+        """Test FindingIdentifier accepts None for metadata_product_uid"""
+        identifier = FindingIdentifier(
+            cloud_account_uid="123456789012",
+            finding_info_uid="finding-1",
+            metadata_product_uid=None  # None is acceptable
+        )
+        assert identifier.metadata_product_uid is None
+        assert identifier.cloud_account_uid == "123456789012"
+
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
+    def test_update_status_unprocessed_findings_string_identifier(self, mock_get_client):
+        """Test UnprocessedFindings parsing when FindingIdentifier is a string"""
+        mock_client = Mock()
+        mock_client.batch_update_findings_v2.return_value = {
+            "ProcessedFindings": [],
+            "UnprocessedFindings": [
+                {
+                    "FindingIdentifier": "arn:aws:securityhub:us-east-1:123456789012:finding/abc123",
+                    "ErrorCode": "NotFound",
+                    "ErrorMessage": "Finding not found"
+                }
+            ]
+        }
+        mock_get_client.return_value = mock_client
+
+        result = update_finding_status(
+            UpdateFindingsV2Input(
+                metadata_uids=["arn:aws:securityhub:us-east-1:123456789012:finding/abc123"],
+                status_id=2,
+            )
+        )
+
+        assert result["success"] is False
+        assert result["unprocessed_count"] == 1
+        assert len(result["unprocessed_findings"]) == 1
+        # String identifier should be returned as-is (normalized)
+        assert isinstance(result["unprocessed_findings"][0]["finding_identifier"], str)
+        assert "arn:aws:securityhub" in result["unprocessed_findings"][0]["finding_identifier"]
+
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
+    def test_update_status_unprocessed_findings_dict_identifier(self, mock_get_client):
+        """Test UnprocessedFindings parsing when FindingIdentifier is a dict (3-point ID)"""
+        mock_client = Mock()
+        mock_client.batch_update_findings_v2.return_value = {
+            "ProcessedFindings": [],
+            "UnprocessedFindings": [
+                {
+                    "FindingIdentifier": {
+                        "CloudAccountUid": "123456789012",
+                        "FindingInfoUid": "finding-1",
+                        "MetadataProductUid": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+                    },
+                    "ErrorCode": "InvalidParameter",
+                    "ErrorMessage": "Invalid status transition"
+                }
+            ]
+        }
+        mock_get_client.return_value = mock_client
+
+        result = update_finding_status(
+            UpdateFindingsV2Input(
+                finding_identifiers=[
+                    {
+                        "cloud_account_uid": "123456789012",
+                        "finding_info_uid": "finding-1",
+                        "metadata_product_uid": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+                    }
+                ],
+                status_id=2,
+            )
+        )
+
+        assert result["success"] is False
+        assert result["unprocessed_count"] == 1
+        unprocessed = result["unprocessed_findings"][0]
+        # Dict identifier should be normalized to slash-separated format
+        assert "/" in unprocessed["finding_identifier"]
+        assert "123456789012" in unprocessed["finding_identifier"]
+        assert "finding-1" in unprocessed["finding_identifier"]
 
 
 # ============================================================================

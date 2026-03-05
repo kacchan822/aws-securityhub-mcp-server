@@ -91,9 +91,37 @@ class GetFindingsInput(BaseModel):
 
 class FindingIdentifier(BaseModel):
     """3-point identifier for batch_update_findings_v2"""
-    cloud_account_uid: str = Field(description="Cloud account UID")
-    finding_info_uid: str = Field(description="Finding info UID")
-    metadata_product_uid: str = Field(description="Metadata product UID")
+    cloud_account_uid: str = Field(
+        description="Cloud account UID (12-digit AWS account ID)",
+        min_length=1
+    )
+    finding_info_uid: str = Field(
+        description="Finding info UID",
+        min_length=1
+    )
+    metadata_product_uid: str | None = Field(
+        default=None,
+        description="Metadata product UID (typically ARN format)"
+    )
+    
+    @field_validator("cloud_account_uid")
+    @classmethod
+    def validate_cloud_account_uid(cls, v: str) -> str:
+        """Validate cloud_account_uid is 12-digit AWS account ID"""
+        if not (len(v) == 12 and v.isdigit()):
+            raise ValueError(
+                f"cloud_account_uid must be 12-digit AWS account ID, got: {v}"
+            )
+        return v
+    
+    @model_validator(mode="after")
+    def validate_not_empty_strings(self) -> "FindingIdentifier":
+        """Ensure no field contains empty string"""
+        if self.metadata_product_uid == "":
+            raise ValueError(
+                "metadata_product_uid cannot be empty string; use None instead"
+            )
+        return self
 
 
 class UpdateFindingsV2Input(BaseModel):
@@ -301,7 +329,7 @@ def format_finding_for_response(finding: dict[str, Any]) -> dict[str, Any]:
         "metadata_uid": metadata.get("uid"),
         "cloud_account_uid": account.get("uid"),
         "finding_info_uid": finding_info.get("uid"),
-        "metadata_product_uid": metadata.get("product", {}).get("uid", ""),
+        "metadata_product_uid": metadata.get("product", {}).get("uid"),
         "title": finding_info.get("title"),
         "description": finding_info.get("desc"),
         "severity": finding.get("severity"),
@@ -434,11 +462,21 @@ def update_finding_status(
     
     Args:
         input_data: UpdateFindingsV2Input model.
-            - metadata_uids: List of metadata UIDs
-            - finding_identifiers: List of 3-point identifiers
+            - metadata_uids: List of metadata UIDs (mutually exclusive with finding_identifiers)
+            - finding_identifiers: List of 3-point identifiers (mutually exclusive with metadata_uids)
             - status_id: Target status ID (0-6, 99)
-            - aws_region: AWS region
-            - comment: Reason for status change
+            - aws_region: AWS region (optional, defaults to AWS_DEFAULT_REGION or AWS_REGION)
+            - comment: Reason for status change (optional)
+    
+    Status ID Mapping:
+        - 0 (NEW): New finding, not yet reviewed
+        - 1 (ASSIGNED): Finding assigned to someone for remediation
+        - 2 (RESOLVED): Finding has been fixed and remediated
+        - 3 (SUPPRESSED): Finding is intentionally suppressed/ignored
+        - 4 (DEFERRED): Finding action deferred to a later time
+        - 5 (TOLERATED): Risk accepted, no action needed
+        - 6 (EXPIRED): Finding is no longer relevant
+        - 99 (NO_FINDINGS): No security findings detected
     
     Returns:
         Dictionary containing:
@@ -446,14 +484,32 @@ def update_finding_status(
         - processed_count: Number of successfully updated Findings
         - unprocessed_count: Number of failed updates
         - unprocessed_findings: List of failures (if any)
-        
+            - finding_identifier: The identifier that failed (string or CloudUid/FindingUid/ProductUid format)
+            - error_code: AWS error code
+            - error_message: Human-readable error message
+    
     Example:
-        # Update using metadata UIDs
+        # Update using metadata UIDs to mark as resolved
         update_finding_status(
             input_data=UpdateFindingsV2Input(
                 metadata_uids=['arn:aws:securityhub:...'],
-                status_id=2,
-                comment='Resolved by patching',
+                status_id=2,  # RESOLVED
+                comment='Fixed by applying security patch',
+            )
+        )
+        
+        # Update using 3-point identifiers to mark as assigned
+        update_finding_status(
+            input_data=UpdateFindingsV2Input(
+                finding_identifiers=[
+                    FindingIdentifier(
+                        cloud_account_uid="123456789012",
+                        finding_info_uid="finding-123",
+                        metadata_product_uid="arn:aws:securityhub:..."
+                    )
+                ],
+                status_id=1,  # ASSIGNED
+                comment='Assigned to security team',
             )
         )
     """
@@ -471,7 +527,11 @@ def update_finding_status(
             update_params["MetadataUids"] = input_data.metadata_uids
             logger.info(f"Updating {len(input_data.metadata_uids)} findings by metadata_uids")
         else:
-            assert input_data.finding_identifiers is not None
+            if input_data.finding_identifiers is None:
+                raise ValueError(
+                    "Internal validation error: finding_identifiers must not be None "
+                    "(this should have been caught by model validator)"
+                )
             update_params["FindingIdentifiers"] = [
                 {
                     "CloudAccountUid": fi.cloud_account_uid,
@@ -499,14 +559,29 @@ def update_finding_status(
         }
         
         if unprocessed:
-            result["unprocessed_findings"] = [
-                {
-                    "finding_identifier": item.get("FindingIdentifier", {}),
+            unprocessed_findings = []
+            for item in unprocessed:
+                finding_identifier = item.get("FindingIdentifier", {})
+                
+                # Normalize FindingIdentifier: could be string (metadata_uid) or dict (3-point ID)
+                if isinstance(finding_identifier, str):
+                    identifier_str = finding_identifier
+                elif isinstance(finding_identifier, dict):
+                    # 3-point identifier format
+                    cloud_uid = finding_identifier.get("CloudAccountUid", "")
+                    finding_uid = finding_identifier.get("FindingInfoUid", "")
+                    product_uid = finding_identifier.get("MetadataProductUid", "")
+                    identifier_str = f"{cloud_uid}/{finding_uid}/{product_uid}"
+                else:
+                    identifier_str = str(finding_identifier)
+                
+                unprocessed_findings.append({
+                    "finding_identifier": identifier_str,
                     "error_code": item.get("ErrorCode"),
                     "error_message": item.get("ErrorMessage")
-                }
-                for item in unprocessed
-            ]
+                })
+            
+            result["unprocessed_findings"] = unprocessed_findings
         
         logger.info(f"Update complete: {processed_count} succeeded, {unprocessed_count} failed")
         return result
