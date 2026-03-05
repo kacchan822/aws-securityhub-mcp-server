@@ -1,4 +1,4 @@
-# AWS SecurityHub MCP Server
+# AWS Security Hub MCP Server
 
 > [!WARNING]
 > このプロジェクトは現在開発中の不安定版です。仕様変更や破壊的変更が発生する可能性があります。
@@ -8,70 +8,62 @@ AWS SecurityHubと連携するModel Context Protocol (MCP)サーバーです。F
 
 ## 概要
 
-このMCPサーバーは、Claude等のAIアシスタントがAWS SecurityHubを操作できるようにするためのツールを提供します。
+このMCPサーバーは、AIアシスタントがAWS Security Hubを操作できるようにするためのツールを提供します。
 
 ## 要件
 
-- Python 3.11以上
-- uv (Pythonパッケージマネージャー)
-- AWS認証情報
+- Python 3.11+
+- uv
+- 利用するツールに応じたSecurity Hubの権限を持つAWS認証情報
+- AWS CLIが適切なプロファイルで設定されていること（オプション）
 
 ## セットアップ
 
-### 1. 環境構築
+### リモートリから直接取得して起動する場合
 
-```bash
-# uvをインストール (まだの場合)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# プロジェクトディレクトリに移動
-cd aws-securityhub-mcp-server
-
-# 仮想環境を作成して依存関係をインストール
-uv sync
+```json
+{
+ "mcpServers": {
+    "aws-securityhub-mcp-server": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/kacchan822/aws-securityhub-mcp-server@main", "aws-securityhub-mcp-server"],
+      "env": {
+        "AWS_PROFILE": "your-aws-profile", // Optional - uses your local AWS configuration if not specified
+        "AWS_REGION": "your-aws-region", // Optional - uses your local AWS configuration if not specified
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    }
+  }
+}
 ```
 
-### 2. AWS認証情報の設定
+### インストールしてから起動する場合
 
-`.env` ファイルを作成し、AWS認証情報を設定します：
-
-```env
-AWS_PROFILE=your-profile
-AWS_DEFAULT_REGION=ap-northeast-1
-# AWS_DEFAULT_REGION未設定時のフォールバック
-AWS_REGION=ap-northeast-1
-```
-
-または、AWS CLIの設定ファイルを使用します。
-
-## 開発
-
-### 依存関係の追加
+#### インストール
 
 ```bash
-# 新しい依存関係を追加
-uv pip install package-name
-
-# 開発用の依存関係を追加
-uv pip install --group dev package-name
+uv pip install git+https://github.com/kacchan822/aws-securityhub-mcp-server.git
 ```
 
-### テストの実行
+#### 設定
 
-```bash
-uv run pytest
-```
-
-### コードフォーマット
-
-```bash
-uv run black src tests
-uv run ruff check --fix src tests
+```json
+{
+ "mcpServers": {
+    "aws-securityhub-mcp-server": {
+      "command": "uvx",
+      "args": ["--from", "aws-securityhub-mcp-server", "aws-securityhub-mcp-server"],
+      "env": {
+        "AWS_PROFILE": "your-aws-profile", // Optional - uses your local AWS configuration if not specified
+        "AWS_REGION": "your-aws-region", // Optional - uses your local AWS configuration if not specified
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    }
+  }
+}
 ```
 
 ## ツール
-
-このサーバーで利用可能なツール：
 
 ### `get_security_hub_findings`
 
@@ -79,7 +71,7 @@ AWS SecurityHubからFindingを検索・取得します（V2 API使用）。
 
 **入力（Pydanticモデル）：**
 - `input_data` (`GetFindingsInput`):
-  - `aws_region` (str, optional): AWSリージョン。未指定時は `AWS_DEFAULT_REGION` → `AWS_REGION` の順で参照し、どちらも未設定ならエラー
+  - `aws_region` (str, optional): AWSリージョン。未指定時は `AWS_DEFAULT_REGION`, `AWS_REGION` の順で参照し、未指定の場合はエラー
   - `severities` (list[str], optional): 重要度フィルタ（Fatal, Critical, High, Medium, Low, Informational）
   - `aws_account_ids` (list[str], optional): AWSアカウントIDリスト（12桁）
   - `titles` (list[str], optional): Findingタイトル（前方一致）
@@ -127,27 +119,6 @@ FindingのステータスをV2 APIで更新します。
   - `finding_identifier`: 識別子
   - `error_code`: エラーコード
   - `error_message`: エラーメッセージ
-
-## サーバーの実行
-
-```bash
-uv run python -m aws_securityhub_mcp_server.server
-```
-
-## プロジェクト構造
-
-```
-├── pyproject.toml           # プロジェクト設定
-├── README.md                # このファイル
-├── .gitignore               # Git無視設定
-├── .env.example             # 環境変数のテンプレート
-├── src/
-│   └── aws_securityhub_mcp_server/
-│       ├── __init__.py
-│       └── server.py        # MCPサーバーのメイン処理
-└── tests/
-    └── test_server.py       # テスト
-```
 
 ## ライセンス
 
