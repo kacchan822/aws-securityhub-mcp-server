@@ -1,5 +1,9 @@
 # AWS SecurityHub MCP Server
 
+> [!WARNING]
+> このプロジェクトは現在開発中の不安定版です。仕様変更や破壊的変更が発生する可能性があります。
+> 本番環境での利用は非推奨です。
+
 AWS SecurityHubと連携するModel Context Protocol (MCP)サーバーです。FastMCPフレームワークを使用して構築されています。
 
 ## 概要
