@@ -216,44 +216,67 @@ class TestFormatFindingForResponse:
     """Test finding formatting for response"""
 
     def test_format_finding_complete(self):
-        """Test formatting with complete finding data"""
+        """Test formatting with complete finding data in OCSF format"""
         raw_finding = {
-            "Id": "arn:aws:securityhub:us-east-1:123456789012:finding/12345",
-            "Title": "Test Finding",
-            "Description": "Test description",
-            "Severity": {"Label": "CRITICAL"},
-            "AwsAccountId": "123456789012",
-            "FindingInfoUid": "finding-uid-123",
-            "ProductArn": "arn:aws:securityhub:us-east-1::product/aws/securityhub",
-            "StatusId": 0,
-            "Resources": [
-                {
-                    "Type": "AwsEc2Instance",
-                    "Id": "i-1234567890abcdef0"
+            "metadata": {
+                "uid": "arn:aws:securityhub:us-east-1:123456789012:finding/12345",
+                "product": {
+                    "uid": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
                 }
-            ],
-            "CreatedAt": "2024-01-01T00:00:00.000Z",
-            "UpdatedAt": "2024-01-02T00:00:00.000Z",
+            },
+            "finding_info": {
+                "uid": "finding-uid-123",
+                "title": "Test Finding",
+                "desc": "Test description"
+            },
+            "cloud": {
+                "account": {
+                    "uid": "123456789012"
+                }
+            },
+            "severity": "Critical",
+            "status_id": 0,
+            "time": {
+                "created": "2024-01-01T00:00:00.000Z",
+                "modified": "2024-01-02T00:00:00.000Z"
+            },
+            "resources": [
+                {
+                    "type": "AwsEc2Instance",
+                    "uid": "i-1234567890abcdef0"
+                }
+            ]
         }
 
         formatted = format_finding_for_response(raw_finding)
 
-        assert formatted["metadata_uid"] == raw_finding["Id"]
+        assert formatted["metadata_uid"] == "arn:aws:securityhub:us-east-1:123456789012:finding/12345"
         assert formatted["cloud_account_uid"] == "123456789012"
         assert formatted["finding_info_uid"] == "finding-uid-123"
-        assert formatted["metadata_product_uid"] == raw_finding["ProductArn"]
+        assert formatted["metadata_product_uid"] == "arn:aws:securityhub:us-east-1::product/aws/securityhub"
         assert formatted["title"] == "Test Finding"
-        assert formatted["severity"] == "CRITICAL"
+        assert formatted["description"] == "Test description"
+        assert formatted["severity"] == "Critical"
         assert formatted["status_id"] == 0
+        assert formatted["created_at"] == "2024-01-01T00:00:00.000Z"
+        assert formatted["updated_at"] == "2024-01-02T00:00:00.000Z"
         assert formatted["resource_type"] == "AwsEc2Instance"
         assert formatted["resource_id"] == "i-1234567890abcdef0"
 
     def test_format_finding_minimal(self):
-        """Test formatting with minimal fields"""
+        """Test formatting with minimal fields in OCSF format"""
         raw_finding = {
-            "Id": "test-id",
-            "Title": "Test",
-            "AwsAccountId": "123456789012",
+            "metadata": {
+                "uid": "test-id"
+            },
+            "finding_info": {
+                "title": "Test"
+            },
+            "cloud": {
+                "account": {
+                    "uid": "123456789012"
+                }
+            }
         }
 
         formatted = format_finding_for_response(raw_finding)
@@ -261,9 +284,98 @@ class TestFormatFindingForResponse:
         assert formatted["metadata_uid"] == "test-id"
         assert formatted["title"] == "Test"
         assert formatted["cloud_account_uid"] == "123456789012"
-        assert formatted["finding_info_uid"] == "test-id"  # Fallback to Id
-        assert formatted["metadata_product_uid"] == ""  # Fallback to empty
+        assert formatted["finding_info_uid"] is None  # Not provided in minimal case
+        assert formatted["metadata_product_uid"] == ""  # Empty when product.uid not present
         assert formatted["severity"] is None
+
+    def test_format_finding_no_null_values_for_complete_data(self):
+        """Test that complete OCSF finding data returns no null values"""
+        raw_finding = {
+            "metadata": {
+                "uid": "arn:aws:securityhub:us-west-2:987654321098:finding/test-finding",
+                "product": {
+                    "uid": "arn:aws:securityhub:us-west-2::product/aws/guardduty"
+                }
+            },
+            "finding_info": {
+                "uid": "test-finding-uid",
+                "title": "Suspicious Activity Detected",
+                "desc": "Detailed description of the security issue"
+            },
+            "cloud": {
+                "account": {
+                    "uid": "987654321098"
+                }
+            },
+            "severity": "Medium",
+            "status_id": 3,
+            "time": {
+                "created": "2024-03-01T10:00:00.000Z",
+                "modified": "2024-03-05T12:30:00.000Z"
+            },
+            "resources": [
+                {
+                    "type": "AwsEc2SecurityGroup",
+                    "uid": "sg-0123456789abcdef0"
+                }
+            ]
+        }
+
+        formatted = format_finding_for_response(raw_finding)
+
+        # Verify none of the key fields are null
+        assert formatted["metadata_uid"] is not None
+        assert formatted["cloud_account_uid"] is not None
+        assert formatted["finding_info_uid"] is not None
+        assert formatted["metadata_product_uid"] is not None
+        assert formatted["title"] is not None
+        assert formatted["description"] is not None
+        assert formatted["severity"] is not None
+        assert formatted["status_id"] is not None
+        assert formatted["created_at"] is not None
+        assert formatted["updated_at"] is not None
+        assert formatted["resource_type"] is not None
+        assert formatted["resource_id"] is not None
+
+    def test_format_finding_multiple_resources(self):
+        """Test formatting with multiple resources (only first is extracted)"""
+        raw_finding = {
+            "metadata": {"uid": "test-id"},
+            "finding_info": {"title": "Multi Resource Finding"},
+            "cloud": {"account": {"uid": "111111111111"}},
+            "resources": [
+                {"type": "AwsEc2Instance", "uid": "i-first"},
+                {"type": "AwsS3Bucket", "uid": "bucket-second"},
+                {"type": "AwsIamRole", "uid": "role-third"}
+            ]
+        }
+
+        formatted = format_finding_for_response(raw_finding)
+
+        # Should extract only the first resource
+        assert formatted["resource_type"] == "AwsEc2Instance"
+        assert formatted["resource_id"] == "i-first"
+
+    def test_format_finding_empty_nested_objects(self):
+        """Test formatting handles empty nested objects gracefully"""
+        raw_finding = {
+            "metadata": {},
+            "finding_info": {},
+            "cloud": {},
+            "resources": []
+        }
+
+        formatted = format_finding_for_response(raw_finding)
+
+        # All fields should be None or empty when nested objects are empty
+        assert formatted["metadata_uid"] is None
+        assert formatted["cloud_account_uid"] is None
+        assert formatted["finding_info_uid"] is None
+        assert formatted["metadata_product_uid"] == ""
+        assert formatted["title"] is None
+        assert formatted["description"] is None
+        assert formatted["resource_type"] is None
+        assert formatted["resource_id"] is None
 
 
 # ============================================================================
@@ -275,25 +387,59 @@ class TestGetSecurityHubFindings:
 
     @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_get_findings_success(self, mock_get_client):
-        """Test successful findings retrieval with V2 API"""
+        """Test successful findings retrieval with V2 API in OCSF format"""
         mock_client = Mock()
         mock_client.get_findings_v2.return_value = {
             "Findings": [
                 {
-                    "Id": "finding-1",
-                    "Title": "Test Finding 1",
-                    "AwsAccountId": "123456789012",
-                    "Severity": {"Label": "HIGH"},
-                    "StatusId": 0,
-                    "Resources": [{"Type": "AwsEc2Instance", "Id": "i-123"}],
+                    "metadata": {
+                        "uid": "arn:aws:securityhub:us-east-1:123456789012:finding/finding-1",
+                        "product": {
+                            "uid": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+                        }
+                    },
+                    "finding_info": {
+                        "uid": "finding-1",
+                        "title": "Test Finding 1",
+                        "desc": "Description 1"
+                    },
+                    "cloud": {
+                        "account": {
+                            "uid": "123456789012"
+                        }
+                    },
+                    "severity": "High",
+                    "status_id": 0,
+                    "time": {
+                        "created": "2024-01-01T00:00:00.000Z",
+                        "modified": "2024-01-02T00:00:00.000Z"
+                    },
+                    "resources": [{"type": "AwsEc2Instance", "uid": "i-123"}],
                 },
                 {
-                    "Id": "finding-2",
-                    "Title": "Test Finding 2",
-                    "AwsAccountId": "123456789012",
-                    "Severity": {"Label": "CRITICAL"},
-                    "StatusId": 1,
-                    "Resources": [],
+                    "metadata": {
+                        "uid": "arn:aws:securityhub:us-east-1:123456789012:finding/finding-2",
+                        "product": {
+                            "uid": "arn:aws:securityhub:us-east-1::product/aws/securityhub"
+                        }
+                    },
+                    "finding_info": {
+                        "uid": "finding-2",
+                        "title": "Test Finding 2",
+                        "desc": "Description 2"
+                    },
+                    "cloud": {
+                        "account": {
+                            "uid": "123456789012"
+                        }
+                    },
+                    "severity": "Critical",
+                    "status_id": 1,
+                    "time": {
+                        "created": "2024-01-03T00:00:00.000Z",
+                        "modified": "2024-01-04T00:00:00.000Z"
+                    },
+                    "resources": [],
                 },
             ],
             "NextToken": "next-page-token"
@@ -310,8 +456,12 @@ class TestGetSecurityHubFindings:
         assert result["count"] == 2
         assert len(result["findings"]) == 2
         assert result["next_token"] == "next-page-token"
-        assert result["findings"][0]["metadata_uid"] == "finding-1"
-        assert result["findings"][1]["severity"] == "CRITICAL"
+        assert result["findings"][0]["metadata_uid"] == "arn:aws:securityhub:us-east-1:123456789012:finding/finding-1"
+        assert result["findings"][0]["finding_info_uid"] == "finding-1"
+        assert result["findings"][0]["title"] == "Test Finding 1"
+        assert result["findings"][0]["severity"] == "High"
+        assert result["findings"][1]["severity"] == "Critical"
+        assert result["findings"][1]["title"] == "Test Finding 2"
 
         # Verify V2 API call
         mock_client.get_findings_v2.assert_called_once()

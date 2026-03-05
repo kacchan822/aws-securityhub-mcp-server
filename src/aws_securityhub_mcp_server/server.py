@@ -256,23 +256,46 @@ def build_composite_filters_v2(
 
 
 def format_finding_for_response(finding: dict[str, Any]) -> dict[str, Any]:
-    """Format Finding from get_findings_v2 for LLM consumption"""
-    resources = finding.get("Resources", [])
+    """Format Finding from get_findings_v2 (OCSF format) for LLM consumption
+    
+    AWS Security Hub V2 API returns findings in OCSF (Open Cybersecurity Schema Framework) format.
+    This function extracts relevant fields from the nested OCSF structure.
+    
+    OCSF Structure:
+    - metadata.uid: Full ARN-like identifier
+    - metadata.product.uid: Product ARN
+    - finding_info.uid: Finding-specific identifier
+    - finding_info.title: Finding title
+    - finding_info.desc: Finding description
+    - cloud.account.uid: AWS Account ID
+    - severity: Severity string (Critical, High, Medium, Low, Informational, Fatal)
+    - status_id: Integer status code
+    - time.created: Creation timestamp
+    - time.modified: Last modification timestamp
+    - resources[]: Array of resource objects with type and uid
+    """
+    # Extract nested OCSF fields with safe navigation
+    metadata = finding.get("metadata", {})
+    finding_info = finding.get("finding_info", {})
+    cloud = finding.get("cloud", {})
+    account = cloud.get("account", {})
+    time_info = finding.get("time", {})
+    resources = finding.get("resources", [])
     resource = resources[0] if resources else {}
     
     return {
-        "metadata_uid": finding.get("Id"),  # Full ARN-like ID
-        "cloud_account_uid": finding.get("AwsAccountId"),
-        "finding_info_uid": finding.get("FindingInfoUid", finding.get("Id")),  # Fallback to Id
-        "metadata_product_uid": finding.get("ProductArn", ""),
-        "title": finding.get("Title"),
-        "description": finding.get("Description"),
-        "severity": finding.get("Severity", {}).get("Label"),
-        "status_id": finding.get("StatusId"),  # Integer status
-        "created_at": finding.get("CreatedAt"),
-        "updated_at": finding.get("UpdatedAt"),
-        "resource_type": resource.get("Type"),
-        "resource_id": resource.get("Id"),
+        "metadata_uid": metadata.get("uid"),
+        "cloud_account_uid": account.get("uid"),
+        "finding_info_uid": finding_info.get("uid"),
+        "metadata_product_uid": metadata.get("product", {}).get("uid", ""),
+        "title": finding_info.get("title"),
+        "description": finding_info.get("desc"),
+        "severity": finding.get("severity"),
+        "status_id": finding.get("status_id"),
+        "created_at": time_info.get("created"),
+        "updated_at": time_info.get("modified"),
+        "resource_type": resource.get("type"),
+        "resource_id": resource.get("uid"),
     }
 
 
