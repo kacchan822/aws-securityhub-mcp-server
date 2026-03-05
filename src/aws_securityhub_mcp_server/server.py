@@ -267,21 +267,35 @@ def format_finding_for_response(finding: dict[str, Any]) -> dict[str, Any]:
     - finding_info.uid: Finding-specific identifier
     - finding_info.title: Finding title
     - finding_info.desc: Finding description
+    - finding_info.created_time: Creation timestamp (Long, milliseconds since epoch)
+    - finding_info.modified_time: Last modification timestamp (Long, milliseconds since epoch)
     - cloud.account.uid: AWS Account ID
     - severity: Severity string (Critical, High, Medium, Low, Informational, Fatal)
     - status_id: Integer status code
-    - time.created: Creation timestamp
-    - time.modified: Last modification timestamp
     - resources[]: Array of resource objects with type and uid
+    - time: Unix timestamp (integer, for reference)
     """
+    from datetime import datetime, timezone
+    
     # Extract nested OCSF fields with safe navigation
     metadata = finding.get("metadata", {})
     finding_info = finding.get("finding_info", {})
     cloud = finding.get("cloud", {})
     account = cloud.get("account", {})
-    time_info = finding.get("time", {})
     resources = finding.get("resources", [])
     resource = resources[0] if resources else {}
+    
+    # Convert millisecond timestamps to ISO 8601 format
+    def timestamp_to_iso8601(ts_ms: int | None) -> str | None:
+        """Convert milliseconds since epoch to ISO 8601 format"""
+        if ts_ms is None:
+            return None
+        try:
+            # ts_ms is in milliseconds, convert to seconds
+            dt = datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+            return dt.isoformat().replace("+00:00", "Z")
+        except (ValueError, TypeError, OverflowError):
+            return None
     
     return {
         "metadata_uid": metadata.get("uid"),
@@ -292,8 +306,8 @@ def format_finding_for_response(finding: dict[str, Any]) -> dict[str, Any]:
         "description": finding_info.get("desc"),
         "severity": finding.get("severity"),
         "status_id": finding.get("status_id"),
-        "created_at": time_info.get("created"),
-        "updated_at": time_info.get("modified"),
+        "created_at": timestamp_to_iso8601(finding_info.get("created_time")),
+        "updated_at": timestamp_to_iso8601(finding_info.get("modified_time")),
         "resource_type": resource.get("type"),
         "resource_id": resource.get("uid"),
     }

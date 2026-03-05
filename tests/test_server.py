@@ -227,7 +227,9 @@ class TestFormatFindingForResponse:
             "finding_info": {
                 "uid": "finding-uid-123",
                 "title": "Test Finding",
-                "desc": "Test description"
+                "desc": "Test description",
+                "created_time": 1704067200000,  # 2024-01-01T00:00:00Z in milliseconds
+                "modified_time": 1704153600000  # 2024-01-02T00:00:00Z in milliseconds
             },
             "cloud": {
                 "account": {
@@ -236,10 +238,7 @@ class TestFormatFindingForResponse:
             },
             "severity": "Critical",
             "status_id": 0,
-            "time": {
-                "created": "2024-01-01T00:00:00.000Z",
-                "modified": "2024-01-02T00:00:00.000Z"
-            },
+            "time": 1704067200000,  # Unix timestamp in milliseconds
             "resources": [
                 {
                     "type": "AwsEc2Instance",
@@ -258,8 +257,9 @@ class TestFormatFindingForResponse:
         assert formatted["description"] == "Test description"
         assert formatted["severity"] == "Critical"
         assert formatted["status_id"] == 0
-        assert formatted["created_at"] == "2024-01-01T00:00:00.000Z"
-        assert formatted["updated_at"] == "2024-01-02T00:00:00.000Z"
+        # Timestamps should be converted to ISO 8601 format
+        assert formatted["created_at"] == "2024-01-01T00:00:00Z"
+        assert formatted["updated_at"] == "2024-01-02T00:00:00Z"
         assert formatted["resource_type"] == "AwsEc2Instance"
         assert formatted["resource_id"] == "i-1234567890abcdef0"
 
@@ -300,7 +300,9 @@ class TestFormatFindingForResponse:
             "finding_info": {
                 "uid": "test-finding-uid",
                 "title": "Suspicious Activity Detected",
-                "desc": "Detailed description of the security issue"
+                "desc": "Detailed description of the security issue",
+                "created_time": 1709289600000,  # 2024-03-01T10:00:00Z in milliseconds
+                "modified_time": 1709636400000  # 2024-03-05T12:30:00Z in milliseconds
             },
             "cloud": {
                 "account": {
@@ -309,10 +311,7 @@ class TestFormatFindingForResponse:
             },
             "severity": "Medium",
             "status_id": 3,
-            "time": {
-                "created": "2024-03-01T10:00:00.000Z",
-                "modified": "2024-03-05T12:30:00.000Z"
-            },
+            "time": 1709289600000,  # Unix timestamp in milliseconds
             "resources": [
                 {
                     "type": "AwsEc2SecurityGroup",
@@ -401,7 +400,9 @@ class TestGetSecurityHubFindings:
                     "finding_info": {
                         "uid": "finding-1",
                         "title": "Test Finding 1",
-                        "desc": "Description 1"
+                        "desc": "Description 1",
+                        "created_time": 1704067200000,
+                        "modified_time": 1704153600000
                     },
                     "cloud": {
                         "account": {
@@ -410,10 +411,7 @@ class TestGetSecurityHubFindings:
                     },
                     "severity": "High",
                     "status_id": 0,
-                    "time": {
-                        "created": "2024-01-01T00:00:00.000Z",
-                        "modified": "2024-01-02T00:00:00.000Z"
-                    },
+                    "time": 1704067200000,
                     "resources": [{"type": "AwsEc2Instance", "uid": "i-123"}],
                 },
                 {
@@ -426,7 +424,9 @@ class TestGetSecurityHubFindings:
                     "finding_info": {
                         "uid": "finding-2",
                         "title": "Test Finding 2",
-                        "desc": "Description 2"
+                        "desc": "Description 2",
+                        "created_time": 1704240000000,
+                        "modified_time": 1704326400000
                     },
                     "cloud": {
                         "account": {
@@ -435,10 +435,7 @@ class TestGetSecurityHubFindings:
                     },
                     "severity": "Critical",
                     "status_id": 1,
-                    "time": {
-                        "created": "2024-01-03T00:00:00.000Z",
-                        "modified": "2024-01-04T00:00:00.000Z"
-                    },
+                    "time": 1704240000000,
                     "resources": [],
                 },
             ],
