@@ -4,16 +4,25 @@ from pydantic import ValidationError
 import pytest
 from botocore.exceptions import ClientError
 
-from mcp_server.server import (
+from aws_securityhub_mcp_server.server import (
     get_security_hub_findings,
     update_finding_status,
     build_composite_filters_v2,
     format_finding_for_response,
     get_securityhub_client,
+    clear_securityhub_client_cache,
     GetFindingsInput,
     UpdateFindingsV2Input,
     SeverityEnum,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_client_cache_between_tests():
+    """Clear cached clients to keep tests independent."""
+    clear_securityhub_client_cache()
+    yield
+    clear_securityhub_client_cache()
 
 
 # ============================================================================
@@ -149,7 +158,7 @@ class TestBuildCompositeFiltersV2:
         assert composite_filter["Operator"] == "OR"
         assert len(composite_filter["StringFilters"]) == 2
         assert composite_filter["StringFilters"][0]["FieldName"] == "severity"
-        assert composite_filter["StringFilters"][0]["Comparison"] == "EQUALS"
+        assert composite_filter["StringFilters"][0]["Filter"]["Comparison"] == "EQUALS"
 
     def test_build_filters_with_account_ids(self):
         """Test building filters with AWS account IDs"""
@@ -169,7 +178,7 @@ class TestBuildCompositeFiltersV2:
 
         composite_filter = filters["CompositeFilters"][0]
         assert composite_filter["StringFilters"][0]["FieldName"] == "finding_info.title"
-        assert composite_filter["StringFilters"][0]["Comparison"] == "PREFIX"
+        assert composite_filter["StringFilters"][0]["Filter"]["Comparison"] == "PREFIX"
 
     def test_build_filters_with_status_ids(self):
         """Test building filters with status IDs (NumberFilters)"""
@@ -178,7 +187,7 @@ class TestBuildCompositeFiltersV2:
         composite_filter = filters["CompositeFilters"][0]
         assert "NumberFilters" in composite_filter
         assert composite_filter["NumberFilters"][0]["FieldName"] == "status_id"
-        assert composite_filter["NumberFilters"][0]["Comparison"] == "EQUALS"
+        assert composite_filter["NumberFilters"][0]["Filter"]["Eq"] == 0
         assert len(composite_filter["NumberFilters"]) == 3
 
     def test_build_filters_combined(self):
@@ -264,7 +273,7 @@ class TestFormatFindingForResponse:
 class TestGetSecurityHubFindings:
     """Test get_security_hub_findings tool"""
 
-    @patch("mcp_server.server.get_securityhub_client")
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_get_findings_success(self, mock_get_client):
         """Test successful findings retrieval with V2 API"""
         mock_client = Mock()
@@ -292,8 +301,10 @@ class TestGetSecurityHubFindings:
         mock_get_client.return_value = mock_client
 
         result = get_security_hub_findings(
-            severities=["High", "Critical"],
-            max_results=20
+            GetFindingsInput(
+                severities=[SeverityEnum.HIGH, SeverityEnum.CRITICAL],
+                max_results=20,
+            )
         )
 
         assert result["count"] == 2
@@ -309,14 +320,14 @@ class TestGetSecurityHubFindings:
         assert "Filters" in call_kwargs
         assert "CompositeFilters" in call_kwargs["Filters"]
 
-    @patch("mcp_server.server.get_securityhub_client")
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_get_findings_pagination(self, mock_get_client):
         """Test findings retrieval with pagination token"""
         mock_client = Mock()
         mock_client.get_findings_v2.return_value = {"Findings": []}
         mock_get_client.return_value = mock_client
 
-        get_security_hub_findings(next_token="previous-token", max_results=50)
+        get_security_hub_findings(GetFindingsInput(next_token="previous-token", max_results=50))
 
         call_kwargs = mock_client.get_findings_v2.call_args[1]
         assert call_kwargs["NextToken"] == "previous-token"
@@ -324,14 +335,14 @@ class TestGetSecurityHubFindings:
 
     def test_get_findings_validation_error(self):
         """Test validation error handling"""
-        result = get_security_hub_findings(max_results=200)  # Invalid: > 100
+        result = get_security_hub_findings({"max_results": 200})  # Invalid: > 100
 
         assert result["error"] == "ValidationError"
         assert "100" in result["message"]  # Check for "100" in message
         assert result["count"] == 0
         assert result["findings"] == []
 
-    @patch("mcp_server.server.get_securityhub_client")
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_get_findings_client_error(self, mock_get_client):
         """Test AWS ClientError handling"""
         mock_client = Mock()
@@ -341,7 +352,7 @@ class TestGetSecurityHubFindings:
         )
         mock_get_client.return_value = mock_client
 
-        result = get_security_hub_findings()
+        result = get_security_hub_findings(GetFindingsInput())
 
         assert result["error"] == "AccessDeniedException"
         assert result["message"] == "Access denied"
@@ -351,7 +362,7 @@ class TestGetSecurityHubFindings:
 class TestUpdateFindingStatus:
     """Test update_finding_status tool"""
 
-    @patch("mcp_server.server.get_securityhub_client")
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_update_status_with_metadata_uids(self, mock_get_client):
         """Test successful status update using metadata UIDs"""
         mock_client = Mock()
@@ -362,9 +373,11 @@ class TestUpdateFindingStatus:
         mock_get_client.return_value = mock_client
 
         result = update_finding_status(
-            metadata_uids=["uid-1", "uid-2"],
-            status_id=2,
-            comment="Resolved"
+            UpdateFindingsV2Input(
+                metadata_uids=["uid-1", "uid-2"],
+                status_id=2,
+                comment="Resolved",
+            )
         )
 
         assert result["success"] is True
@@ -378,7 +391,7 @@ class TestUpdateFindingStatus:
         assert call_kwargs["StatusId"] == 2
         assert call_kwargs["Comment"] == "Resolved"
 
-    @patch("mcp_server.server.get_securityhub_client")
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_update_status_with_finding_identifiers(self, mock_get_client):
         """Test status update using 3-point finding identifiers"""
         mock_client = Mock()
@@ -389,14 +402,16 @@ class TestUpdateFindingStatus:
         mock_get_client.return_value = mock_client
 
         result = update_finding_status(
-            finding_identifiers=[
-                {
-                    "cloud_account_uid": "123456789012",
-                    "finding_info_uid": "finding-1",
-                    "metadata_product_uid": "product-1"
-                }
-            ],
-            status_id=2
+            UpdateFindingsV2Input(
+                finding_identifiers=[
+                    {
+                        "cloud_account_uid": "123456789012",
+                        "finding_info_uid": "finding-1",
+                        "metadata_product_uid": "product-1"
+                    }
+                ],
+                status_id=2,
+            )
         )
 
         assert result["success"] is True
@@ -407,7 +422,7 @@ class TestUpdateFindingStatus:
         assert len(call_kwargs["FindingIdentifiers"]) == 1
         assert call_kwargs["FindingIdentifiers"][0]["CloudAccountUid"] == "123456789012"
 
-    @patch("mcp_server.server.get_securityhub_client")
+    @patch("aws_securityhub_mcp_server.server.get_securityhub_client")
     def test_update_status_partial_failure(self, mock_get_client):
         """Test partial failure in status update"""
         mock_client = Mock()
@@ -424,8 +439,10 @@ class TestUpdateFindingStatus:
         mock_get_client.return_value = mock_client
 
         result = update_finding_status(
-            metadata_uids=["uid-1", "uid-2"],
-            status_id=2
+            UpdateFindingsV2Input(
+                metadata_uids=["uid-1", "uid-2"],
+                status_id=2,
+            )
         )
 
         assert result["success"] is False
@@ -435,7 +452,7 @@ class TestUpdateFindingStatus:
 
     def test_update_status_validation_error_no_identifiers(self):
         """Test validation error when no identifiers specified"""
-        result = update_finding_status(status_id=2)
+        result = update_finding_status({"status_id": 2})
 
         assert result["success"] is False
         assert result["error"] == "ValidationError"
@@ -443,8 +460,7 @@ class TestUpdateFindingStatus:
     def test_update_status_validation_error_invalid_status_id(self):
         """Test validation error for invalid status ID"""
         result = update_finding_status(
-            metadata_uids=["uid1"],
-            status_id=50  # Invalid
+            {"metadata_uids": ["uid1"], "status_id": 50}  # Invalid
         )
 
         assert result["success"] is False
@@ -458,17 +474,18 @@ class TestUpdateFindingStatus:
 class TestGetSecurityHubClient:
     """Test SecurityHub client initialization"""
 
-    @patch("mcp_server.server.boto3.client")
-    def test_client_with_default_region(self, mock_boto_client):
-        """Test client initialization with default region"""
+    @patch("aws_securityhub_mcp_server.server.boto3.client")
+    @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "ap-southeast-2"}, clear=True)
+    def test_client_with_default_region_env(self, mock_boto_client):
+        """Test client initialization with AWS_DEFAULT_REGION"""
         mock_client = Mock()
         mock_boto_client.return_value = mock_client
 
         get_securityhub_client()
 
-        mock_boto_client.assert_called_once_with("securityhub", region_name="ap-northeast-1")
+        mock_boto_client.assert_called_once_with("securityhub", region_name="ap-southeast-2")
 
-    @patch("mcp_server.server.boto3.client")
+    @patch("aws_securityhub_mcp_server.server.boto3.client")
     def test_client_with_custom_region(self, mock_boto_client):
         """Test client initialization with custom region"""
         mock_client = Mock()
@@ -478,13 +495,31 @@ class TestGetSecurityHubClient:
 
         mock_boto_client.assert_called_once_with("securityhub", region_name="us-west-2")
 
-    @patch("mcp_server.server.boto3.client")
-    @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "eu-west-1"})
-    def test_client_with_env_region(self, mock_boto_client):
-        """Test client initialization with region from environment"""
+    @patch("aws_securityhub_mcp_server.server.boto3.client")
+    @patch.dict("os.environ", {"AWS_REGION": "eu-west-1"}, clear=True)
+    def test_client_with_aws_region_fallback(self, mock_boto_client):
+        """Test client initialization with fallback region from AWS_REGION"""
         mock_client = Mock()
         mock_boto_client.return_value = mock_client
 
+        get_securityhub_client()
+
+        mock_boto_client.assert_called_once_with("securityhub", region_name="eu-west-1")
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_client_without_region_raises_validation_error(self):
+        """Test client initialization fails if no region is provided."""
+        with pytest.raises(ValueError):
+            get_securityhub_client()
+
+    @patch("aws_securityhub_mcp_server.server.boto3.client")
+    @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "eu-west-1"}, clear=True)
+    def test_client_cache_reuses_same_region_client(self, mock_boto_client):
+        """Test client cache reuse for the same region."""
+        mock_client = Mock()
+        mock_boto_client.return_value = mock_client
+
+        get_securityhub_client()
         get_securityhub_client()
 
         mock_boto_client.assert_called_once_with("securityhub", region_name="eu-west-1")

@@ -1,13 +1,14 @@
 """AWS SecurityHub MCP Server with V2 API"""
+from functools import lru_cache
 import logging
 import os
-from typing import Optional, Dict, Any, List
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
 import boto3
 from botocore.exceptions import ClientError
 from fastmcp import FastMCP
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,23 +34,23 @@ class SeverityEnum(str, Enum):
 
 class GetFindingsInput(BaseModel):
     """Input schema for get_security_hub_findings"""
-    aws_region: Optional[str] = Field(
+    aws_region: str | None = Field(
         default=None,
-        description="AWS region (default: AWS_DEFAULT_REGION or ap-northeast-1)"
+        description="AWS region (default: AWS_DEFAULT_REGION or AWS_REGION)"
     )
-    severities: Optional[List[SeverityEnum]] = Field(
+    severities: list[SeverityEnum] | None = Field(
         default=None,
         description="Filter by severity levels"
     )
-    aws_account_ids: Optional[List[str]] = Field(
+    aws_account_ids: list[str] | None = Field(
         default=None,
         description="Filter by AWS account IDs (12-digit format)"
     )
-    titles: Optional[List[str]] = Field(
+    titles: list[str] | None = Field(
         default=None,
         description="Filter by Finding titles (prefix match)"
     )
-    status_ids: Optional[List[int]] = Field(
+    status_ids: list[int] | None = Field(
         default=None,
         description="Filter by status IDs (0-6, 99)"
     )
@@ -59,14 +60,14 @@ class GetFindingsInput(BaseModel):
         le=100,
         description="Maximum results (1-100)"
     )
-    next_token: Optional[str] = Field(
+    next_token: str | None = Field(
         default=None,
         description="Pagination token"
     )
 
     @field_validator("aws_account_ids")
     @classmethod
-    def validate_account_ids(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+    def validate_account_ids(cls, v: list[str] | None) -> list[str] | None:
         """Validate AWS account IDs are 12 digits"""
         if v is None:
             return v
@@ -77,7 +78,7 @@ class GetFindingsInput(BaseModel):
 
     @field_validator("status_ids")
     @classmethod
-    def validate_status_ids(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+    def validate_status_ids(cls, v: list[int] | None) -> list[int] | None:
         """Validate status IDs are in valid range"""
         if v is None:
             return v
@@ -97,22 +98,22 @@ class FindingIdentifier(BaseModel):
 
 class UpdateFindingsV2Input(BaseModel):
     """Input schema for update_finding_status"""
-    aws_region: Optional[str] = Field(
+    aws_region: str | None = Field(
         default=None,
-        description="AWS region (default: AWS_DEFAULT_REGION or ap-northeast-1)"
+        description="AWS region (default: AWS_DEFAULT_REGION or AWS_REGION)"
     )
-    metadata_uids: Optional[List[str]] = Field(
+    metadata_uids: list[str] | None = Field(
         default=None,
         description="Metadata UID list (mutually exclusive with finding_identifiers)"
     )
-    finding_identifiers: Optional[List[FindingIdentifier]] = Field(
+    finding_identifiers: list[FindingIdentifier] | None = Field(
         default=None,
         description="3-point identifier list (mutually exclusive with metadata_uids)"
     )
     status_id: int = Field(
         description="Target status ID (0-6, 99)"
     )
-    comment: Optional[str] = Field(
+    comment: str | None = Field(
         default=None,
         description="Status change reason"
     )
@@ -145,11 +146,23 @@ class UpdateFindingsV2Input(BaseModel):
 # AWS SecurityHub Client & Helper Functions
 # ============================================================================
 
-def get_securityhub_client(region_name: Optional[str] = None):
-    """Initialize and return a SecurityHub boto3 client (V2 API)"""
-    if region_name is None:
-        region_name = os.environ.get("AWS_DEFAULT_REGION", "ap-northeast-1")
-    
+def resolve_region(region_name: str | None = None) -> str:
+    """Resolve AWS region from explicit input or environment variables."""
+    if region_name:
+        return region_name
+
+    env_region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
+    if env_region:
+        return env_region
+
+    raise ValueError(
+        "AWS region is required. Specify aws_region or set AWS_DEFAULT_REGION/AWS_REGION"
+    )
+
+
+@lru_cache(maxsize=16)
+def _get_securityhub_client_cached(region_name: str):
+    """Initialize and cache a SecurityHub boto3 client by region."""
     try:
         client = boto3.client("securityhub", region_name=region_name)
         logger.info(f"Initialized SecurityHub client for region: {region_name}")
@@ -159,12 +172,22 @@ def get_securityhub_client(region_name: Optional[str] = None):
         raise
 
 
+def get_securityhub_client(region_name: str | None = None):
+    """Initialize and return a SecurityHub boto3 client (V2 API)."""
+    return _get_securityhub_client_cached(resolve_region(region_name))
+
+
+def clear_securityhub_client_cache() -> None:
+    """Clear cached SecurityHub clients (for tests and environment changes)."""
+    _get_securityhub_client_cached.cache_clear()
+
+
 def build_composite_filters_v2(
-    severities: Optional[List[str]] = None,
-    aws_account_ids: Optional[List[str]] = None,
-    titles: Optional[List[str]] = None,
-    status_ids: Optional[List[int]] = None
-) -> Optional[Dict[str, Any]]:
+    severities: list[str] | None = None,
+    aws_account_ids: list[str] | None = None,
+    titles: list[str] | None = None,
+    status_ids: list[int] | None = None,
+) -> dict[str, Any] | None:
     """
     Build V2 CompositeFilters structure from simple parameters.
     
@@ -178,7 +201,10 @@ def build_composite_filters_v2(
     if severities:
         composite_filters.append({
             "StringFilters": [
-                {"FieldName": "severity", "Value": sev, "Comparison": "EQUALS"}
+                {
+                    "FieldName": "severity",
+                    "Filter": {"Value": sev, "Comparison": "EQUALS"},
+                }
                 for sev in severities
             ],
             "Operator": "OR"
@@ -188,7 +214,10 @@ def build_composite_filters_v2(
     if aws_account_ids:
         composite_filters.append({
             "StringFilters": [
-                {"FieldName": "cloud.account.uid", "Value": acc_id, "Comparison": "EQUALS"}
+                {
+                    "FieldName": "cloud.account.uid",
+                    "Filter": {"Value": acc_id, "Comparison": "EQUALS"},
+                }
                 for acc_id in aws_account_ids
             ],
             "Operator": "OR"
@@ -198,7 +227,10 @@ def build_composite_filters_v2(
     if titles:
         composite_filters.append({
             "StringFilters": [
-                {"FieldName": "finding_info.title", "Value": title, "Comparison": "PREFIX"}
+                {
+                    "FieldName": "finding_info.title",
+                    "Filter": {"Value": title, "Comparison": "PREFIX"},
+                }
                 for title in titles
             ],
             "Operator": "OR"
@@ -208,7 +240,7 @@ def build_composite_filters_v2(
     if status_ids:
         composite_filters.append({
             "NumberFilters": [
-                {"FieldName": "status_id", "Value": int(sid), "Comparison": "EQUALS"}
+                {"FieldName": "status_id", "Filter": {"Eq": int(sid)}}
                 for sid in status_ids
             ],
             "Operator": "OR"
@@ -223,7 +255,7 @@ def build_composite_filters_v2(
     }
 
 
-def format_finding_for_response(finding: Dict[str, Any]) -> Dict[str, Any]:
+def format_finding_for_response(finding: dict[str, Any]) -> dict[str, Any]:
     """Format Finding from get_findings_v2 for LLM consumption"""
     resources = finding.get("Resources", [])
     resource = resources[0] if resources else {}
@@ -250,14 +282,8 @@ def format_finding_for_response(finding: Dict[str, Any]) -> Dict[str, Any]:
 
 @mcp.tool()
 def get_security_hub_findings(
-    aws_region: Optional[str] = None,
-    severities: Optional[List[str]] = None,
-    aws_account_ids: Optional[List[str]] = None,
-    titles: Optional[List[str]] = None,
-    status_ids: Optional[List[int]] = None,
-    max_results: int = 20,
-    next_token: Optional[str] = None
-) -> Dict[str, Any]:
+    input_data: GetFindingsInput,
+) -> dict[str, Any]:
     """
     Retrieve Security Hub Findings using V2 API with flexible filtering.
     
@@ -265,13 +291,14 @@ def get_security_hub_findings(
     using the get_findings_v2 API with CompositeFilters for flexible filtering.
     
     Args:
-        aws_region: AWS region to query (default: ap-northeast-1)
-        severities: List of severity levels (Fatal, Critical, High, Medium, Low, Informational)
-        aws_account_ids: List of AWS account IDs to filter (12-digit format)
-        titles: List of Finding titles (prefix match)
-        status_ids: List of status IDs to filter (0-6, 99)
-        max_results: Maximum Findings to return (1-100, default: 20)
-        next_token: Pagination token from previous response
+        input_data: GetFindingsInput model.
+            - aws_region: AWS region to query
+            - severities: List of severity levels
+            - aws_account_ids: List of AWS account IDs (12-digit format)
+            - titles: List of Finding titles (prefix match)
+            - status_ids: List of status IDs (0-6, 99)
+            - max_results: Maximum Findings to return (1-100)
+            - next_token: Pagination token from previous response
     
     Returns:
         Dictionary containing:
@@ -282,21 +309,15 @@ def get_security_hub_findings(
     Example:
         # Get all Critical findings
         get_security_hub_findings(
-            severities=['Critical'],
-            max_results=50
+            input_data=GetFindingsInput(
+                severities=[SeverityEnum.CRITICAL],
+                max_results=50,
+            )
         )
     """
     try:
-        # Validate input
-        input_data = GetFindingsInput(
-            aws_region=aws_region,
-            severities=severities,
-            aws_account_ids=aws_account_ids,
-            titles=titles,
-            status_ids=status_ids,
-            max_results=max_results,
-            next_token=next_token
-        )
+        if isinstance(input_data, dict):
+            input_data = GetFindingsInput(**input_data)
         
         # Get client
         client = get_securityhub_client(input_data.aws_region)
@@ -336,7 +357,7 @@ def get_security_hub_findings(
         logger.info(f"Retrieved {len(formatted_findings)} findings")
         return result
         
-    except ValueError as e:
+    except (ValidationError, ValueError) as e:
         logger.error(f"Validation error: {str(e)}")
         return {
             "error": "ValidationError",
@@ -366,12 +387,8 @@ def get_security_hub_findings(
 
 @mcp.tool()
 def update_finding_status(
-    metadata_uids: Optional[List[str]] = None,
-    finding_identifiers: Optional[List[Dict[str, str]]] = None,
-    status_id: int = None,
-    aws_region: Optional[str] = None,
-    comment: Optional[str] = None
-) -> Dict[str, Any]:
+    input_data: UpdateFindingsV2Input,
+) -> dict[str, Any]:
     """
     Update Finding status using batch_update_findings_v2.
     
@@ -379,14 +396,12 @@ def update_finding_status(
     Uses either metadata_uids OR finding_identifiers (mutually exclusive).
     
     Args:
-        metadata_uids: List of metadata UIDs (from get_security_hub_findings)
-                      Mutually exclusive with finding_identifiers
-        finding_identifiers: List of 3-point identifiers (from get_security_hub_findings)
-                            Each dict contains: cloud_account_uid, finding_info_uid, metadata_product_uid
-                            Mutually exclusive with metadata_uids
-        status_id: Target status ID (0-6, 99) - REQUIRED
-        aws_region: AWS region (default: ap-northeast-1)
-        comment: Reason for status change
+        input_data: UpdateFindingsV2Input model.
+            - metadata_uids: List of metadata UIDs
+            - finding_identifiers: List of 3-point identifiers
+            - status_id: Target status ID (0-6, 99)
+            - aws_region: AWS region
+            - comment: Reason for status change
     
     Returns:
         Dictionary containing:
@@ -398,22 +413,16 @@ def update_finding_status(
     Example:
         # Update using metadata UIDs
         update_finding_status(
-            metadata_uids=['arn:aws:securityhub:...'],
-            status_id=2,
-            comment='Resolved by patching'
+            input_data=UpdateFindingsV2Input(
+                metadata_uids=['arn:aws:securityhub:...'],
+                status_id=2,
+                comment='Resolved by patching',
+            )
         )
     """
     try:
-        # Validate input
-        input_data = UpdateFindingsV2Input(
-            aws_region=aws_region,
-            metadata_uids=metadata_uids,
-            finding_identifiers=[
-                FindingIdentifier(**f) for f in (finding_identifiers or [])
-            ] if finding_identifiers else None,
-            status_id=status_id,
-            comment=comment
-        )
+        if isinstance(input_data, dict):
+            input_data = UpdateFindingsV2Input(**input_data)
         
         # Get client
         client = get_securityhub_client(input_data.aws_region)
@@ -464,7 +473,7 @@ def update_finding_status(
         logger.info(f"Update complete: {processed_count} succeeded, {unprocessed_count} failed")
         return result
         
-    except ValueError as e:
+    except (ValidationError, ValueError) as e:
         logger.error(f"Validation error: {str(e)}")
         return {
             "success": False,

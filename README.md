@@ -34,6 +34,8 @@ uv sync
 ```env
 AWS_PROFILE=your-profile
 AWS_DEFAULT_REGION=ap-northeast-1
+# AWS_DEFAULT_REGION未設定時のフォールバック
+AWS_REGION=ap-northeast-1
 ```
 
 または、AWS CLIの設定ファイルを使用します。
@@ -71,14 +73,15 @@ uv run ruff check --fix src tests
 
 AWS SecurityHubからFindingを検索・取得します（V2 API使用）。
 
-**パラメータ：**
-- `aws_region` (str, optional): AWSリージョン。デフォルト: `ap-northeast-1`
-- `severities` (list[str], optional): 重要度フィルタ（Fatal, Critical, High, Medium, Low, Informational）
-- `aws_account_ids` (list[str], optional): AWSアカウントIDリスト（12桁）
-- `titles` (list[str], optional): Findingタイトル（前方一致）
-- `status_ids` (list[int], optional): ステータスID（0-6, 99）
-- `max_results` (int, optional): 返却件数（1-100、デフォルト: 20）
-- `next_token` (str, optional): ページネーション用トークン
+**入力（Pydanticモデル）：**
+- `input_data` (`GetFindingsInput`):
+  - `aws_region` (str, optional): AWSリージョン。未指定時は `AWS_DEFAULT_REGION` → `AWS_REGION` の順で参照し、どちらも未設定ならエラー
+  - `severities` (list[str], optional): 重要度フィルタ（Fatal, Critical, High, Medium, Low, Informational）
+  - `aws_account_ids` (list[str], optional): AWSアカウントIDリスト（12桁）
+  - `titles` (list[str], optional): Findingタイトル（前方一致）
+  - `status_ids` (list[int], optional): ステータスID（0-6, 99）
+  - `max_results` (int, optional): 返却件数（1-100、デフォルト: 20）
+  - `next_token` (str, optional): ページネーション用トークン
 
 **戻り値：**
 - `findings`: Finding配列
@@ -101,16 +104,16 @@ AWS SecurityHubからFindingを検索・取得します（V2 API使用）。
 
 FindingのステータスをV2 APIで更新します。
 
-**パラメータ：**
-- `aws_region` (str, optional): AWSリージョン。デフォルト: `ap-northeast-1`
-- `metadata_uids` (list[str], optional): メタデータUIDリスト。`finding_identifiers`と排他。
-- `finding_identifiers` (list[dict], optional): 3点識別子リスト。以下を含む：
-  - `cloud_account_uid` (str): アカウントUID
-  - `finding_info_uid` (str): Finding情報UID
-  - `metadata_product_uid` (str): プロダクトUID
-  - `metadata_uids`と排他。
-- `status_id` (int, required): 更新先ステータスID（0-6, 99）
-- `comment` (str, optional): 変更理由
+**入力（Pydanticモデル）：**
+- `input_data` (`UpdateFindingsV2Input`):
+  - `aws_region` (str, optional): AWSリージョン。未指定時は `AWS_DEFAULT_REGION` → `AWS_REGION` の順で参照し、どちらも未設定ならエラー
+  - `metadata_uids` (list[str], optional): メタデータUIDリスト。`finding_identifiers`と排他。
+  - `finding_identifiers` (list[dict], optional): 3点識別子リスト。以下を含む：
+    - `cloud_account_uid` (str): アカウントUID
+    - `finding_info_uid` (str): Finding情報UID
+    - `metadata_product_uid` (str): プロダクトUID
+  - `status_id` (int, required): 更新先ステータスID（0-6, 99）
+  - `comment` (str, optional): 変更理由
 
 **戻り値：**
 - `success` (bool): 全件成功時True
@@ -124,7 +127,7 @@ FindingのステータスをV2 APIで更新します。
 ## サーバーの実行
 
 ```bash
-uv run python -m mcp_server.server
+uv run python -m aws_securityhub_mcp_server.server
 ```
 
 ## プロジェクト構造
@@ -135,7 +138,7 @@ uv run python -m mcp_server.server
 ├── .gitignore               # Git無視設定
 ├── .env.example             # 環境変数のテンプレート
 ├── src/
-│   └── mcp_server/
+│   └── aws_securityhub_mcp_server/
 │       ├── __init__.py
 │       └── server.py        # MCPサーバーのメイン処理
 └── tests/
