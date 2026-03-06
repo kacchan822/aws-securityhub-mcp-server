@@ -1,4 +1,5 @@
 # AWS Security Hub MCP Server
+[![Test](https://github.com/kacchan822/aws-securityhub-mcp-server/actions/workflows/test.yml/badge.svg)](https://github.com/kacchan822/aws-securityhub-mcp-server/actions/workflows/test.yml)
 
 > [!WARNING]
 > このプロジェクトは現在開発中の不安定版です。仕様変更や破壊的変更が発生する可能性があります。
