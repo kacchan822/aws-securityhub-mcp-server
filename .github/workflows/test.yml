@@ -3,12 +3,20 @@ name: Test
 on:
   push:
     branches: [ main ]
+    paths: 
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/test.yml'
   pull_request:
     branches: [ main ]
+    paths: 
+      - 'src/**'
+      - 'tests/**'
+      - '.github/workflows/test.yml'
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@v6
       
@@ -27,7 +35,7 @@ jobs:
         run: ruff check src/ tests/
 
   type-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@v6
       
@@ -46,7 +54,7 @@ jobs:
         run: mypy src/
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     strategy:
       matrix:
         python-version: ['3.11', '3.12', '3.13', '3.14']
