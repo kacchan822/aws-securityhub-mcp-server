@@ -2,6 +2,7 @@
 from functools import lru_cache
 import logging
 import os
+import re
 from enum import Enum
 from typing import Any
 
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp = FastMCP("aws-securityhub-server")
+
+# Basic AWS region format used by standard commercial, gov, and China regions.
+# Examples: us-east-1, ap-northeast-1, us-gov-west-1, cn-north-1
+AWS_REGION_PATTERN = re.compile(r"^[a-z]{2}(-gov)?-[a-z]+-\d+$")
 
 
 # ============================================================================
@@ -175,18 +180,33 @@ class UpdateFindingsV2Input(BaseModel):
 # ============================================================================
 
 def resolve_region(region_name: str | None = None) -> str:
-    """Resolve AWS region from explicit input or environment variables."""
-    if region_name:
-        return region_name
+    """Resolve AWS region from explicit input or environment variables.
+
+    Validates basic AWS region naming convention:
+    - Pattern: {geo}-{direction}-{number} (e.g., us-east-1, ap-northeast-1)
+    - Supports common partitions such as aws, aws-us-gov, aws-cn
+    """
+    explicit_region = region_name.strip() if region_name is not None else None
+    if region_name is not None and not explicit_region:
+        raise ValueError(
+            "aws_region was provided but is empty. Specify a non-empty region name"
+        )
 
     env_region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
-    if env_region:
-        return env_region
+    resolved_region = explicit_region or (env_region.strip() if env_region else None)
 
-    raise ValueError(
-        "AWS region is required. Specify aws_region or set AWS_DEFAULT_REGION/AWS_REGION"
-    )
+    if not resolved_region:
+        raise ValueError(
+            "AWS region is required. Specify aws_region or set AWS_DEFAULT_REGION/AWS_REGION"
+        )
 
+    if not AWS_REGION_PATTERN.match(resolved_region):
+        raise ValueError(
+            f"Invalid AWS region format: '{resolved_region}'. "
+            f"Expected format: [geo]-[direction]-[number] (e.g., us-east-1, ap-northeast-1)"
+        )
+
+    return resolved_region
 
 @lru_cache(maxsize=16)
 def _get_securityhub_client_cached(region_name: str):

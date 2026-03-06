@@ -9,6 +9,7 @@ from aws_securityhub_mcp_server.server import (
     update_finding_status,
     build_composite_filters_v2,
     format_finding_for_response,
+    resolve_region,
     get_securityhub_client,
     clear_securityhub_client_cache,
     GetFindingsInput,
@@ -740,6 +741,33 @@ class TestUpdateFindingStatus:
 # ============================================================================
 # Client Initialization Tests
 # ============================================================================
+
+class TestResolveRegion:
+    """Test AWS region resolution and validation."""
+
+    def test_resolve_region_with_explicit_value(self):
+        """Returns explicit region when provided."""
+        assert resolve_region("us-west-2") == "us-west-2"
+
+    @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "ap-northeast-1"}, clear=True)
+    def test_resolve_region_empty_explicit_value_raises(self):
+        """Empty explicit region should not silently fall back to environment."""
+        with pytest.raises(ValueError) as exc_info:
+            resolve_region("   ")
+        assert "aws_region was provided but is empty" in str(exc_info.value)
+
+    @patch.dict("os.environ", {"AWS_DEFAULT_REGION": "eu-west-1"}, clear=True)
+    def test_resolve_region_falls_back_to_default_region_env(self):
+        """Resolves region from AWS_DEFAULT_REGION when explicit value is absent."""
+        assert resolve_region() == "eu-west-1"
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_resolve_region_rejects_non_basic_region_format(self):
+        """Rejects non-basic partition region names not covered by this server."""
+        with pytest.raises(ValueError) as exc_info:
+            resolve_region("us-iso-east-1")
+        assert "Invalid AWS region format" in str(exc_info.value)
+
 
 class TestGetSecurityHubClient:
     """Test SecurityHub client initialization"""
