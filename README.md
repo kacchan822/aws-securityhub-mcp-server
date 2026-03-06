@@ -19,7 +19,7 @@ AWS SecurityHubと連携するModel Context Protocol (MCP)サーバーです。F
 
 ## セットアップ
 
-### リモートリから直接取得して起動する場合
+### リモートリポジトリから直接取得して起動する場合
 
 ```json
 {
