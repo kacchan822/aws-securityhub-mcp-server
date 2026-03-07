@@ -31,7 +31,7 @@ AWS SecurityHubと連携するModel Context Protocol (MCP)サーバーです。F
       "env": {
         "AWS_PROFILE": "your-aws-profile", // Optional - uses your local AWS configuration if not specified
         "AWS_REGION": "your-aws-region", // Optional - uses your local AWS configuration if not specified
-        "FASTMCP_LOG_LEVEL": "ERROR"
+        "LOG_LEVEL": "INFO" // Optional - controls logging level for both FastMCP and application
       }
     }
   }
@@ -57,12 +57,20 @@ uv pip install git+https://github.com/kacchan822/aws-securityhub-mcp-server.git
       "env": {
         "AWS_PROFILE": "your-aws-profile", // Optional - uses your local AWS configuration if not specified
         "AWS_REGION": "your-aws-region", // Optional - uses your local AWS configuration if not specified
-        "FASTMCP_LOG_LEVEL": "ERROR"
+        "LOG_LEVEL": "INFO" // Optional - controls logging level for both FastMCP and application
       }
     }
   }
 }
 ```
+
+## 環境変数
+
+| 環境変数 | デフォルト | 説明 |
+|---------|----------|------|
+| `AWS_PROFILE` | - | AWS CLIプロファイル（オプション） |
+| `AWS_DEFAULT_REGION` / `AWS_REGION` | - | AWSリージョン（どちらか一方を指定） |
+| `LOG_LEVEL` | `INFO` | ログレベル（DEBUG, INFO, WARNING, ERROR, CRITICAL） |
 
 ## ツール
 

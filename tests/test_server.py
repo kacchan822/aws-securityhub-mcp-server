@@ -10,6 +10,7 @@ from aws_securityhub_mcp_server.server import (
     build_composite_filters_v2,
     format_finding_for_response,
     resolve_region,
+    resolve_log_level,
     get_securityhub_client,
     clear_securityhub_client_cache,
     GetFindingsInput,
@@ -25,6 +26,62 @@ def clear_client_cache_between_tests():
     clear_securityhub_client_cache()
     yield
     clear_securityhub_client_cache()
+
+
+# ============================================================================
+# Log Level Resolution Tests
+# ============================================================================
+
+class TestResolveLogLevel:
+    """Test resolve_log_level function"""
+
+    def test_default_without_env(self, monkeypatch):
+        """Test default INFO level when LOG_LEVEL not set"""
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        import logging
+        assert resolve_log_level() == logging.INFO
+
+    def test_valid_log_levels(self, monkeypatch):
+        """Test valid log level strings (case-insensitive)"""
+        import logging
+        test_cases = [
+            ("DEBUG", logging.DEBUG),
+            ("debug", logging.DEBUG),
+            ("INFO", logging.INFO),
+            ("info", logging.INFO),
+            ("WARNING", logging.WARNING),
+            ("warning", logging.WARNING),
+            ("ERROR", logging.ERROR),
+            ("error", logging.ERROR),
+            ("CRITICAL", logging.CRITICAL),
+            ("critical", logging.CRITICAL),
+        ]
+        for level_str, expected_level in test_cases:
+            monkeypatch.setenv("LOG_LEVEL", level_str)
+            assert resolve_log_level() == expected_level
+
+    def test_invalid_log_level(self, monkeypatch, caplog):
+        """Test invalid log level - should default to INFO and log warning"""
+        import logging
+        monkeypatch.setenv("LOG_LEVEL", "INVALID")
+        with caplog.at_level(logging.WARNING):
+            result = resolve_log_level()
+        assert result == logging.INFO
+        assert "Invalid LOG_LEVEL" in caplog.text
+
+    def test_empty_log_level(self, monkeypatch, caplog):
+        """Test empty LOG_LEVEL string - should default to INFO and log warning"""
+        import logging
+        monkeypatch.setenv("LOG_LEVEL", "")
+        with caplog.at_level(logging.WARNING):
+            result = resolve_log_level()
+        assert result == logging.INFO
+
+    def test_explicit_level_parameter(self):
+        """Test explicit level parameter"""
+        import logging
+        result = resolve_log_level("DEBUG")
+        assert result == logging.DEBUG
 
 
 # ============================================================================

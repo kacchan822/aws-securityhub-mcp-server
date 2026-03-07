@@ -11,8 +11,48 @@ from botocore.exceptions import ClientError
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - log level can be controlled via LOG_LEVEL environment variable
+def resolve_log_level(level_name: str | None = None) -> int:
+    """Resolve logging level from explicit input or LOG_LEVEL environment variable.
+
+    Converts string level names to logging constants.
+    Supports: DEBUG, INFO, WARNING, ERROR, CRITICAL (case-insensitive).
+    Defaults to INFO if not specified or invalid.
+    """
+    explicit_level = level_name.strip().upper() if level_name is not None else None
+    if level_name is not None and not explicit_level:
+        logger_temp = logging.getLogger(__name__)
+        logger_temp.warning(
+            "LOG_LEVEL was provided but is empty. Using default: INFO"
+        )
+        return logging.INFO
+
+    env_level = os.environ.get("LOG_LEVEL")
+    resolved_level_str = explicit_level or (env_level.strip().upper() if env_level else None)
+
+    # Map string names to logging levels
+    level_map = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+
+    if not resolved_level_str:
+        return logging.INFO  # Default level
+
+    if resolved_level_str not in level_map:
+        logger_temp = logging.getLogger(__name__)
+        logger_temp.warning(
+            f"Invalid LOG_LEVEL: '{resolved_level_str}'. "
+            f"Valid values: {', '.join(level_map.keys())}. Using default: INFO"
+        )
+        return logging.INFO
+
+    return level_map[resolved_level_str]
+
+logging.basicConfig(level=resolve_log_level())
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
