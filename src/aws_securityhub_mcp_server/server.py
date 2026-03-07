@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
-mcp = FastMCP("aws-securityhub-server")
+mcp = FastMCP("aws-securityhub-mcp-server")
 
 # Basic AWS region format used by standard commercial, gov, and China regions.
 # Examples: us-east-1, ap-northeast-1, us-gov-west-1, cn-north-1
